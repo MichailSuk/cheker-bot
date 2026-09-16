@@ -2,9 +2,10 @@ import os
 import time
 import requests
 
-TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "30"))  # Перевірка кожні 30 секунд
+# Зчитування конфігурації з налаштувань Render.com
+TOKEN = os.getenv("8818194468:AAGfrSUY2yC_YDxqG44A1QgYVHY1gndznAE")
+CHAT_ID = os.getenv("8034348951")
+CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "30"))
 
 API_URL = "https://patentiautotrasporto.mit.gov.it/bonuspatente/api/beneficiario/getPlafond"
 SITE_URL = "https://patentiautotrasporto.mit.gov.it/bonuspatente/#/beneficiario/homePage"
@@ -27,35 +28,35 @@ def check_bonus_availability():
         response = requests.get(API_URL, headers=headers, timeout=10)
         if response.status_code == 200:
             return response.json()
-        print(f"Статус відповіді: {response.status_code}")
+        print(f"Статус відповіді сервера: {response.status_code}")
         return None
     except Exception as e:
-        print(f"Помилка запиту: {e}")
+        print(f"Помилка з'єднання: {e}")
         return None
 
 def main():
-    send_telegram_message("🤖 **Бот активований!**\nСтежимо за Bonus Patente кожні 30 секунд...")
+    send_telegram_message("🤖 **Бот запущен!**\nМоніторинг Bonus Patente активовано (перевірка кожні 30 сек).")
     
-    text_was_present = True
+    currently_esauriti = True
     
     while True:
         data = check_bonus_availability()
         
         if data is not None:
-            # Отримуємо значення прапорця вичерпання ваучерів
+            # Логіка: шукаємо прапорець вичерпаності ваучерів
             is_esauriti = data.get("buoniEsauriti", True)
             
-            if text_was_present and not is_esauriti:
-                # Повідомлення надсилається ТІЛЬКИ коли статус змінився на "Є БОНУСИ"
+            if currently_esauriti and not is_esauriti:
+                # Надсилається, якщо ваучери перейшли в статус "доступні"
                 send_telegram_message(
                     "🚨 **УВАГА! З'ЯВИЛИСЯ НОВІ БОНУСИ!** 🚨\n\n"
-                    "Ваучери більше не вичерпані! Терміново заходьте на сайт:\n"
-                    f"🔗 {SITE_URL}"
+                    "Повідомлення про вичерпання зникло, є вільні ваучери!\n"
+                    f"🔗 **Перейти на сайт:** {SITE_URL}"
                 )
-                text_was_present = False
+                currently_esauriti = False
             elif is_esauriti:
-                text_was_present = True
-                print("Ваучери все ще вичерпані (esauriti)...")
+                currently_esauriti = True
+                print("Статус: ваучери все ще вичерпані (esauriti)...")
         
         time.sleep(CHECK_INTERVAL)
 
