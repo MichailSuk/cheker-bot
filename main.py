@@ -1,8 +1,17 @@
 import os
 import time
+import threading
 import requests
+from flask import Flask
 
-# Зчитування конфігурації з налаштувань Render.com
+# Міні-сервер, щоб Render надавав безкоштовний тариф ($0)
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bonus Patente Bot is running!"
+
+# Налаштування зчитуються з Environment Variables на Render
 TOKEN = os.getenv("8818194468:AAGfrSUY2yC_YDxqG44A1QgYVHY1gndznAE")
 CHAT_ID = os.getenv("8034348951")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "30"))
@@ -34,20 +43,15 @@ def check_bonus_availability():
         print(f"Помилка з'єднання: {e}")
         return None
 
-def main():
-    send_telegram_message("🤖 **Бот запущен!**\nМоніторинг Bonus Patente активовано (перевірка кожні 30 сек).")
-    
+def bot_loop():
+    send_telegram_message("🤖 **Бот успішно запущений на Render!**\nМоніторинг Bonus Patente активовано (перевірка кожні 30 сек).")
     currently_esauriti = True
     
     while True:
         data = check_bonus_availability()
-        
         if data is not None:
-            # Логіка: шукаємо прапорець вичерпаності ваучерів
             is_esauriti = data.get("buoniEsauriti", True)
-            
             if currently_esauriti and not is_esauriti:
-                # Надсилається, якщо ваучери перейшли в статус "доступні"
                 send_telegram_message(
                     "🚨 **УВАГА! З'ЯВИЛИСЯ НОВІ БОНУСИ!** 🚨\n\n"
                     "Повідомлення про вичерпання зникло, є вільні ваучери!\n"
@@ -57,8 +61,14 @@ def main():
             elif is_esauriti:
                 currently_esauriti = True
                 print("Статус: ваучери все ще вичерпані (esauriti)...")
-        
         time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
-    main()
+    # Запускаємо перевірку сайту у фоновому потоці
+    t = threading.Thread(target=bot_loop)
+    t.daemon = True
+    t.start()
+    
+    # Запускаємо веб-сервер
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
