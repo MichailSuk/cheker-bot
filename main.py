@@ -6,9 +6,8 @@ from flask import Flask
 
 app = Flask(__name__)
 
-# Отримання змінних середовища з Render
 TOKEN = os.getenv("8818194468:AAGfrSUY2yC_YDxqG44A1QgYVHY1gndznAE")
-CHAT_ID = os.getenv("8034348951")
+CHAT_ID = os.getenv("8034348951s")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "30"))
 
 API_URL = "https://patentiautotrasporto.mit.gov.it/bonuspatente/api/beneficiario/getPlafond"
@@ -19,8 +18,9 @@ def home():
     return "Bot is running!", 200
 
 def send_telegram_message(message):
+    print(f"DEBUG: Намагаємося надіслати повідомлення... TOKEN={bool(TOKEN)}, CHAT_ID={bool(CHAT_ID)}")
     if not TOKEN or not CHAT_ID:
-        print("❌ ПОМИЛКА: BOT_TOKEN або CHAT_ID не вказані у Environment Variables!")
+        print("❌ ПОМИЛКА: BOT_TOKEN або CHAT_ID порожні в Environment Variables!")
         return False
         
     telegram_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -33,10 +33,10 @@ def send_telegram_message(message):
     
     try:
         response = requests.post(telegram_url, json=payload, timeout=10)
-        print(f"📡 Статус Telegram API: {response.status_code} | Відповідь: {response.text}")
+        print(f"📡 Відповідь Telegram: {response.status_code} | {response.text}")
         return response.ok
     except Exception as e:
-        print(f"❌ Помилка з'єднання з Telegram API: {e}")
+        print(f"❌ Помилка запиту до Telegram: {e}")
         return False
 
 def check_bonus_availability():
@@ -49,28 +49,23 @@ def check_bonus_availability():
         response = requests.get(API_URL, headers=headers, timeout=10)
         if response.status_code == 200:
             return response.json()
-        print(f"⚠️ Статус відповіді сервера Bonus Patente: {response.status_code}")
+        print(f"⚠️ Статус відповіді Bonus Patente: {response.status_code}")
         return None
     except Exception as e:
         print(f"❌ Помилка з'єднання з сайтом: {e}")
         return None
 
 def monitor_loop():
-    # Затримка 5 секунд для завершення ініціалізації веб-сервера
-    time.sleep(5)
-    
-    print("🚀 Відправка стартового повідомлення в Telegram...")
+    print("🚀 Початок роботи фонового потоку monitor_loop...")
+    time.sleep(3)
     send_telegram_message("🤖 **Бот успішно запущений!**\nМоніторинг Bonus Patente активовано.")
     
     currently_esauriti = True
-    last_hourly_ping = time.time()
 
     while True:
         data = check_bonus_availability()
-        
         if data is not None:
             is_esauriti = data.get("buoniEsauriti", True)
-            
             if currently_esauriti and not is_esauriti:
                 send_telegram_message(
                     "🚨 **УВАГА! З'ЯВИЛИСЯ НОВІ БОНУСИ!** 🚨\n\n"
@@ -81,18 +76,12 @@ def monitor_loop():
             elif is_esauriti:
                 currently_esauriti = True
 
-        # Щогодинне повідомлення-підтвердження активності (3600 секунд)
-        if time.time() - last_hourly_ping >= 3600:
-            send_telegram_message("🟢 **Бот працює!** Перевірка здійснюється у штатному режимі.")
-            last_hourly_ping = time.time()
-            
         time.sleep(CHECK_INTERVAL)
 
-# Запуск циклу перевірки в окремому потоці
-worker_thread = threading.Thread(target=monitor_loop, daemon=True)
-worker_thread.start()
+# Запускаємо фоновий потік ДО запуску Flask
+t = threading.Thread(target=monitor_loop, daemon=True)
+t.start()
 
 if __name__ == "__main__":
-    from waitress import serve
     port = int(os.environ.get("PORT", 10000))
-    serve(app, host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port)
