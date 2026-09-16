@@ -4,30 +4,39 @@ import threading
 import requests
 from flask import Flask
 
-# Міні-сервер для безкоштовного Web Service на Render
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "Bonus Patente Bot is active!"
-
-# Зчитування конфігурації з Environment Variables на Render
+# Отримання змінних середовища з Render
 TOKEN = os.getenv("8818194468:AAGfrSUY2yC_YDxqG44A1QgYVHY1gndznAE")
 CHAT_ID = os.getenv("8034348951")
-CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "30"))  # Перевірка сайту кожні 30 сек
-HOURLY_INTERVAL = 3600  # 1 година (3600 секунд)
+CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "30"))
 
 API_URL = "https://patentiautotrasporto.mit.gov.it/bonuspatente/api/beneficiario/getPlafond"
 SITE_URL = "https://patentiautotrasporto.mit.gov.it/bonuspatente/#/beneficiario/homePage"
 
+@app.route('/')
+def home():
+    return "Bot is running!", 200
+
 def send_telegram_message(message):
+    if not TOKEN or not CHAT_ID:
+        print("❌ ПОМИЛКА: BOT_TOKEN або CHAT_ID не вказані у Environment Variables!")
+        return False
+        
     telegram_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True
+    }
+    
     try:
         response = requests.post(telegram_url, json=payload, timeout=10)
+        print(f"📡 Статус Telegram API: {response.status_code} | Відповідь: {response.text}")
         return response.ok
     except Exception as e:
-        print(f"Помилка надсилання в Telegram: {e}")
+        print(f"❌ Помилка з'єднання з Telegram API: {e}")
         return False
 
 def check_bonus_availability():
@@ -40,34 +49,28 @@ def check_bonus_availability():
         response = requests.get(API_URL, headers=headers, timeout=10)
         if response.status_code == 200:
             return response.json()
-        print(f"Статус відповіді сервера: {response.status_code}")
+        print(f"⚠️ Статус відповіді сервера Bonus Patente: {response.status_code}")
         return None
     except Exception as e:
-        print(f"Помилка з'єднання з API: {e}")
+        print(f"❌ Помилка з'єднання з сайтом: {e}")
         return None
 
-# Окремий потік для відправки щогодинного статусу "Онлайн"
-def hourly_status_loop():
-    while True:
-        time.sleep(HOURLY_INTERVAL)
-        send_telegram_message("🟢 **Бот працює!**\nМоніторинг Bonus Patente продовжується у штатному режимі.")
-
-# Основний потік моніторингу сайту
-def bot_loop():
-    # Затримка 5 секунд для стабілізації мережевого з'єднання Render
+def monitor_loop():
+    # Затримка 5 секунд для завершення ініціалізації веб-сервера
     time.sleep(5)
     
-    send_telegram_message("🤖 **Бот успішно запущений!**\nМоніторинг Bonus Patente активовано (перевірка кожні 30 сек).")
+    print("🚀 Відправка стартового повідомлення в Telegram...")
+    send_telegram_message("🤖 **Бот успішно запущений!**\nМоніторинг Bonus Patente активовано.")
     
     currently_esauriti = True
-    
+    last_hourly_ping = time.time()
+
     while True:
         data = check_bonus_availability()
         
         if data is not None:
             is_esauriti = data.get("buoniEsauriti", True)
             
-            # Якщо ваучери були вичерпані, але статус змінився (з'явилися нові)
             if currently_esauriti and not is_esauriti:
                 send_telegram_message(
                     "🚨 **УВАГА! З'ЯВИЛИСЯ НОВІ БОНУСИ!** 🚨\n\n"
@@ -77,21 +80,19 @@ def bot_loop():
                 currently_esauriti = False
             elif is_esauriti:
                 currently_esauriti = True
-                print("Статус: ваучери все ще вичерпані (esauriti)...")
-                
+
+        # Щогодинне повідомлення-підтвердження активності (3600 секунд)
+        if time.time() - last_hourly_ping >= 3600:
+            send_telegram_message("🟢 **Бот працює!** Перевірка здійснюється у штатному режимі.")
+            last_hourly_ping = time.time()
+            
         time.sleep(CHECK_INTERVAL)
 
+# Запуск циклу перевірки в окремому потоці
+worker_thread = threading.Thread(target=monitor_loop, daemon=True)
+worker_thread.start()
+
 if __name__ == "__main__":
-    # Запуск основниого моніторингу
-    monitor_thread = threading.Thread(target=bot_loop)
-    monitor_thread.daemon = True
-    monitor_thread.start()
-    
-    # Запуск щогодинного підтвердження роботи
-    hourly_thread = threading.Thread(target=hourly_status_loop)
-    hourly_thread.daemon = True
-    hourly_thread.start()
-    
-    # Запуск веб-сервера Flask
+    from waitress import serve
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    serve(app, host="0.0.0.0", port=port)
