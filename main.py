@@ -1,26 +1,32 @@
 import os
 import time
+import logging
 import threading
 import requests
 from flask import Flask
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+
 app = Flask(__name__)
 
-TOKEN = os.getenv("8818194468:AAGfrSUY2yC_YDxqG44A1QgYVHY1gndznAE")
-CHAT_ID = os.getenv("8034348951s")
+TOKEN = os.getenv("8818194468:AAE62UW5SQEe-1O09p0G9eo0B6ZRw778mr413:34")
+CHAT_ID = os.getenv("8034348951")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "30"))
 
 API_URL = "https://patentiautotrasporto.mit.gov.it/bonuspatente/api/beneficiario/getPlafond"
 SITE_URL = "https://patentiautotrasporto.mit.gov.it/bonuspatente/#/beneficiario/homePage"
 
 @app.route('/')
-def home():
-    return "Bot is running!", 200
+def health_check():
+    return "OK", 200
 
-def send_telegram_message(message):
-    print(f"DEBUG: Намагаємося надіслати повідомлення... TOKEN={bool(TOKEN)}, CHAT_ID={bool(CHAT_ID)}")
+def send_telegram_message(message: str) -> bool:
     if not TOKEN or not CHAT_ID:
-        print("❌ ПОМИЛКА: BOT_TOKEN або CHAT_ID порожні в Environment Variables!")
+        logging.error("BOT_TOKEN або CHAT_ID не вказані у Environment Variables!")
         return False
         
     telegram_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -32,32 +38,31 @@ def send_telegram_message(message):
     }
     
     try:
-        response = requests.post(telegram_url, json=payload, timeout=10)
-        print(f"📡 Відповідь Telegram: {response.status_code} | {response.text}")
-        return response.ok
-    except Exception as e:
-        print(f"❌ Помилка запиту до Telegram: {e}")
+        response = requests.post(telegram_url, json=payload, timeout=8)
+        response.raise_for_status()
+        logging.info("Повідомлення успішно відправлено в Telegram.")
+        return True
+    except requests.exceptions.RequestException as err:
+        logging.error(f"Помилка відправки в Telegram: {err}")
         return False
 
-def check_bonus_availability():
+def check_bonus_availability() -> dict | None:
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
         "Referer": SITE_URL
     }
     try:
         response = requests.get(API_URL, headers=headers, timeout=10)
-        if response.status_code == 200:
-            return response.json()
-        print(f"⚠️ Статус відповіді Bonus Patente: {response.status_code}")
-        return None
-    except Exception as e:
-        print(f"❌ Помилка з'єднання з сайтом: {e}")
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as err:
+        logging.warning(f"Не вдалося отримати дані з API: {err}")
         return None
 
 def monitor_loop():
-    print("🚀 Початок роботи фонового потоку monitor_loop...")
-    time.sleep(3)
+    logging.info("Фоновий потік моніторингу запущено.")
+    
     send_telegram_message("🤖 **Бот успішно запущений!**\nМоніторинг Bonus Patente активовано.")
     
     currently_esauriti = True
@@ -66,7 +71,9 @@ def monitor_loop():
         data = check_bonus_availability()
         if data is not None:
             is_esauriti = data.get("buoniEsauriti", True)
+            
             if currently_esauriti and not is_esauriti:
+                logging.info("Зміна стану: З'ЯВИЛИСЯ ВІЛЬНІ БОНУСИ!")
                 send_telegram_message(
                     "🚨 **УВАГА! З'ЯВИЛИСЯ НОВІ БОНУСИ!** 🚨\n\n"
                     "Повідомлення про вичерпання зникло, є вільні ваучери!\n"
@@ -75,12 +82,10 @@ def monitor_loop():
                 currently_esauriti = False
             elif is_esauriti:
                 currently_esauriti = True
-
+                
         time.sleep(CHECK_INTERVAL)
 
-# Запускаємо фоновий потік ДО запуску Flask
-t = threading.Thread(target=monitor_loop, daemon=True)
-t.start()
+threading.Thread(target=monitor_loop, daemon=True).start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
